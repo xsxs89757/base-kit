@@ -7,6 +7,20 @@ base-kit 的版本记录。格式参考 Keep a Changelog，版本号遵循语义
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-02
+
+首个稳定版。API 与 v0.1.0 一致，配套 [base](https://github.com/xsxs89757/base) 模板 v2.0.0
+（模板的 `server/go.mod` 从此钉这个版本）。
+
+从这个版本起遵守上面的版本规则：MINOR 只增不改，数据库变更只增列，破坏性变更走 `/v2`。
+框架层的 bug 修复和新功能不必等模板发版，下游 `cd server && go get -u github.com/xsxs89757/base-kit` 即可。
+
+### 验证
+
+- 模板 `server/main_test.go` 冒烟测试（启动 → 登录 → 用户信息 → 菜单 → Swagger）通过。
+- 用 `--parseDependencyLevel 3 --packagePrefix base,github.com/xsxs89757/base-kit` 重新生成的
+  `swagger.json` 与抽库前逐字节一致。
+
 ## [0.1.0] - 2026-09-02
 
 从 [xsxs89757/base](https://github.com/xsxs89757/base) 的 `server/internal/` 抽出框架层与系统管理模块，
