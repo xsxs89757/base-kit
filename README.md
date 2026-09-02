@@ -101,6 +101,24 @@ go run github.com/xsxs89757/base-kit/cmd/basekit-migrate@latest ./...
 cd server && go mod tidy
 ```
 
+`base/internal/router` 不在改写范围内——路由挂载点仍归模板所有。
+
+### 自己往基底目录里加过文件的情况
+
+如果之前在 `internal/handler/admin/`、`internal/model/admin/` 这类目录里放过自己的文件
+（真实下游里见过一个目录 15 个），同步之后基底只删了自己那份，你的文件会留在原地。
+这时同一个 import 路径下有两个来源：本地包里你的函数，和 kit 包里基底的函数——
+改写把引用方指向了 kit，你的函数就会 `undefined`，而错误信息看不出根因。
+
+改写工具会在结束时把这些目录列出来。两种处理方式：
+
+1. **把它们挪到自己的包**（推荐），比如 `internal/handler/biz/`，再改引用方的 import。
+   以后基底再动这些目录也不会碰到你。
+2. 保留原地，把引用方改成同时 import kit 包和本地包，各起一个别名。
+
+顺带一提，如果你的文件用到了基底同包里的**未导出**标识符（比如测试里的 `newTestApp`），
+那些标识符现在在 kit 里且不可见，只能自己补一份。
+
 ## 版本
 
 语义化版本。MINOR 只增不改（新配置键带默认值、新种子、新接口）；数据库变更只增列不删列；

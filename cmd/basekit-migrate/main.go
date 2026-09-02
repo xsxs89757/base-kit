@@ -16,6 +16,7 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -65,12 +66,13 @@ func main() {
 	}
 
 	changed := 0
+	seen := map[string]bool{}
 	for _, root := range roots {
 		root = strings.TrimSuffix(strings.TrimSuffix(root, "/..."), "/")
 		if root == "" {
 			root = "."
 		}
-		n, err := walk(root, *dryRun, *verbose)
+		n, err := walk(root, *dryRun, *verbose, seen)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "错误: %v\n", err)
 			os.Exit(1)
@@ -86,9 +88,65 @@ func main() {
 	default:
 		fmt.Printf("已改写 %d 个文件，接着执行: cd server && go mod tidy\n", changed)
 	}
+
+	warnLeftovers(os.Stderr, roots, seen)
 }
 
-func walk(root string, dryRun, verbose bool) (int, error) {
+// warnLeftovers 检查 kit 接管的包目录里是否还留着下游自己的 .go 文件。
+//
+// 下游可能在 internal/handler/admin/ 这类目录里加过自己的文件（真实案例：一个下游有 15 个）。
+// 基底 v2.0.0 只删自己那份，下游的文件会留下来，于是同一个 import 路径下存在两个来源：
+// 本地包里下游自己的函数，和 kit 包里基底的函数。改写 import 后，引用下游那些函数的地方
+// 会指向 kit 并报 undefined——错误信息里看不出根因，所以在这里显式提示。
+func warnLeftovers(w io.Writer, roots []string, seen map[string]bool) {
+	type leftover struct {
+		dir   string
+		files []string
+	}
+	var found []leftover
+	for _, old := range sortedKeys(importMap) {
+		if !seen[old] {
+			continue
+		}
+		// "base/internal/handler/admin" -> "internal/handler/admin"，再挂到各个 root 下面找
+		rel := strings.TrimPrefix(old, "base/")
+		for _, root := range roots {
+			root = strings.TrimSuffix(strings.TrimSuffix(root, "/..."), "/")
+			if root == "" {
+				root = "."
+			}
+			dir := filepath.Join(root, rel)
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				continue
+			}
+			var files []string
+			for _, e := range entries {
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") {
+					files = append(files, e.Name())
+				}
+			}
+			if len(files) > 0 {
+				found = append(found, leftover{dir: dir, files: files})
+			}
+		}
+	}
+	if len(found) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\n注意: 下面的目录已由 base-kit 接管，但仍留着文件——应该是你自己加的:\n")
+	for _, lo := range found {
+		fmt.Fprintf(w, "  %s: %s\n", lo.dir, strings.Join(lo.files, " "))
+	}
+	fmt.Fprintf(w, `
+这些文件本身没被改动，但引用它们的地方 import 已经指向 kit 了，编译会报 undefined。
+两种处理方式，任选其一:
+  1. 把它们挪到自己的包（推荐），比如 internal/handler/biz/，再改引用方的 import；
+  2. 保留原地，把引用方改成同时 import kit 包和本地包（各起一个别名）。
+`)
+}
+
+func walk(root string, dryRun, verbose bool, seen map[string]bool) (int, error) {
 	changed := 0
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -105,7 +163,7 @@ func walk(root string, dryRun, verbose bool) (int, error) {
 		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
-		ok, err := rewriteFile(path, dryRun, verbose)
+		ok, err := rewriteFile(path, dryRun, verbose, seen)
 		if err != nil {
 			return err
 		}
@@ -117,7 +175,7 @@ func walk(root string, dryRun, verbose bool) (int, error) {
 	return changed, err
 }
 
-func rewriteFile(path string, dryRun, verbose bool) (bool, error) {
+func rewriteFile(path string, dryRun, verbose bool, seen map[string]bool) (bool, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
@@ -136,6 +194,7 @@ func rewriteFile(path string, dryRun, verbose bool) (bool, error) {
 		}
 		spec.Path.Value = strconv.Quote(new)
 		modified = true
+		seen[old] = true
 		if verbose {
 			fmt.Printf("  %s: %s -> %s\n", path, old, new)
 		}

@@ -7,6 +7,16 @@ base-kit 的版本记录。格式参考 Keep a Changelog，版本号遵循语义
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-02
+
+### 新增
+
+- `basekit-migrate` 结束时检查 kit 接管的目录里是否还留着下游自己的 `.go` 文件，
+  列出来并说明怎么处理。拿真实下游试跑时发现的：一个项目在 6 个基底目录里放了 48 个自己的文件，
+  改写后引用方指向 kit，那些函数全部 `undefined`，报错信息看不出根因。
+- `cmd/basekit-migrate` 补测试：映射表命中与不命中（`base/internal/router` 和下游自建包必须原样保留）、
+  残留目录提示（空目录和未改写的包不报）。
+
 ## [1.0.0] - 2026-09-02
 
 首个稳定版。API 与 v0.1.0 一致，配套 [base](https://github.com/xsxs89757/base) 模板 v2.0.0
