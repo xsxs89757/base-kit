@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 测试 (sqlite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      # 纯 Go 的 sqlite 驱动，交叉编译时下游会用 CGO_ENABLED=0
+      - run: CGO_ENABLED=0 go build ./...
+      - run: go test ./...
+
+  mysql:
+    name: 迁移 (MySQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # kit 拥有全部模型，而「同一列两个未命名索引」这类建表问题只在 MySQL 上暴露
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: basekit_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: AutoMigrate + 种子数据
+        env:
+          BASEKIT_TEST_MYSQL_DSN: root:root@tcp(127.0.0.1:3306)/basekit_test?charset=utf8mb4&parseTime=True&loc=Local
+        run: go test ./store/ -run TestMySQL -v
