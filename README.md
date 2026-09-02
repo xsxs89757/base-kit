@@ -101,7 +101,10 @@ go run github.com/xsxs89757/base-kit/cmd/basekit-migrate@latest ./...
 cd server && go mod tidy
 ```
 
-`base/internal/router` 不在改写范围内——路由挂载点仍归模板所有。
+`base/internal/router` 和 `base/internal/store` 不在改写范围内：模板 v2.0.0 之后
+仍有这两个同名的本地包（路由挂载点，和转发 `DB` / `IsUniqueViolation` / `syncSeedMenu` 的数据层垫片），
+所以 `store.DB`、`store.IsUniqueViolation` 这些写法一个字都不用改。
+kit 里 store 的其余能力（`SyncSeedMenus`、`RemoveLegacySeedMenus` 等）需要时直接 import kit。
 
 ### 自己往基底目录里加过文件的情况
 

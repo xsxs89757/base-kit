@@ -7,6 +7,16 @@ base-kit 的版本记录。格式参考 Keep a Changelog，版本号遵循语义
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-02
+
+### 修复
+
+- `basekit-migrate` 不再改写 `base/internal/store`。模板 v2.0.0 之后仍有一个同名的本地包
+  （数据层挂载点的垫片，转发 `DB` / `IsUniqueViolation` 并给 `project.go` 提供 `syncSeedMenu`），
+  改写会让 `main.go` 里的 `store.ProjectModels` / `store.ProjectSeed` 变成 undefined。
+  顺带的好处：下游写 `store.DB`、`store.IsUniqueViolation` 的地方一个字都不用改。
+  拿脚手架建的下游走完整升级流程时发现的。
+
 ## [1.0.1] - 2026-09-02
 
 ### 新增

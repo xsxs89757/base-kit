@@ -27,7 +27,13 @@ import (
 const kit = "github.com/xsxs89757/base-kit"
 
 // 搬到 kit 的包。key 是模板里的旧路径，value 是 kit 里的新路径。
-// 注意顺序无关：查表是精确匹配，不做前缀替换（base/internal/router 必须留在模板里）。
+// 注意顺序无关：查表是精确匹配，不做前缀替换。
+//
+// 两个包故意不在表里，因为模板 v2.0.0 之后仍然有同名的本地包：
+//   - base/internal/router：路由挂载点 SetupProject 就在里面；
+//   - base/internal/store：数据层挂载点，垫片提供 DB / IsUniqueViolation / ProjectModels /
+//     ProjectSeed / syncSeedMenu / refreshRoleMenus。下游写 store.DB、store.IsUniqueViolation
+//     的地方一个字都不用改，改写反而会把 main.go 里的 store.ProjectModels 弄丢。
 var importMap = map[string]string{
 	"base/config":                   kit + "/config",
 	"base/internal/dto":             kit + "/dto",
@@ -36,7 +42,6 @@ var importMap = map[string]string{
 	"base/internal/validator/admin": kit + "/validator/admin",
 	"base/internal/model":           kit + "/model",
 	"base/internal/model/admin":     kit + "/model/admin",
-	"base/internal/store":           kit + "/store",
 	"base/internal/middleware":      kit + "/middleware",
 	"base/internal/service/admin":   kit + "/service/admin",
 	"base/internal/handler/admin":   kit + "/handler/admin",
@@ -56,7 +61,7 @@ func main() {
 		for _, k := range sortedKeys(importMap) {
 			fmt.Fprintf(os.Stderr, "  %-32s -> %s\n", k, importMap[k])
 		}
-		fmt.Fprintf(os.Stderr, "\nbase/internal/router 不在映射里：路由挂载点仍留在模板中。\n")
+		fmt.Fprintf(os.Stderr, "\nbase/internal/router 和 base/internal/store 不在映射里：两个挂载点仍留在模板中。\n")
 	}
 	flag.Parse()
 
