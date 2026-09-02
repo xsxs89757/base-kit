@@ -7,6 +7,25 @@ base-kit 的版本记录。格式参考 Keep a Changelog，版本号遵循语义
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-09-02
+
+### 变更
+
+- 生产模式（`server.mode: production`）下 5xx 响应不再回显内部错误原文，对外统一返回
+  `Internal Server Error`，原文进日志。recover 中间件把 panic 也转成这类错误，之前 DB 错误、文件路径
+  会原样出现在响应体里。开发模式行为不变，4xx（404/405 等）不受影响。
+
+### 修复
+
+- `basekit-migrate` 的推荐用法改为在 `server/` 下不带 `@latest` 运行，版本跟随 go.mod 里钉的 kit。
+  `@latest` 在 GOPROXY 有延迟的几分钟里会拿到旧版——而 v1.0.1 正好带着「改写 `base/internal/store`」那个 bug。
+- `basekit-migrate` 结束时提示 import 分组未重排（kit 路径留在原来 `base/...` 那一组），用 `goimports -w .` 归位。
+
+### 文档
+
+- `go get -u` 改为 `go get ...@latest`：`-u` 会把 kit 的依赖一并升到最新 minor，与模板钉死版本的初衷相反。
+- `Bootstrap` 不传 `Seed` 时模板垫片里的 `store.DB` 为 nil，README 点明。
+
 ## [1.0.2] - 2026-09-02
 
 ### 修复
@@ -33,7 +52,7 @@ base-kit 的版本记录。格式参考 Keep a Changelog，版本号遵循语义
 （模板的 `server/go.mod` 从此钉这个版本）。
 
 从这个版本起遵守上面的版本规则：MINOR 只增不改，数据库变更只增列，破坏性变更走 `/v2`。
-框架层的 bug 修复和新功能不必等模板发版，下游 `cd server && go get -u github.com/xsxs89757/base-kit` 即可。
+框架层的 bug 修复和新功能不必等模板发版，下游 `cd server && go get github.com/xsxs89757/base-kit@latest` 即可。
 
 ### 验证
 

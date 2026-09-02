@@ -3,7 +3,10 @@
 // 基底 v2.0.0 把框架层和系统管理模块搬到了 github.com/xsxs89757/base-kit，
 // 下游 make sync-base 之后跑一次这个工具，业务代码里的 import 就自动改好了：
 //
-//	go run github.com/xsxs89757/base-kit/cmd/basekit-migrate@latest ./...
+//	cd server && go run github.com/xsxs89757/base-kit/cmd/basekit-migrate ./...
+//
+// 不带 @latest：在 server/ 下运行时版本跟随 go.mod 里钉的 kit，和库本身一致；
+// @latest 在 GOPROXY 有延迟的几分钟里会拿到旧版。
 //
 // 用 go/ast 改写而不是 sed：sed -i 在 BSD/GNU 下参数不同（dev.sh 还要支持
 // Windows Git Bash），而且正则容易误伤字符串字面量和注释。
@@ -92,6 +95,8 @@ func main() {
 		fmt.Printf("%d 个文件需要改写（-n 未写回）\n", changed)
 	default:
 		fmt.Printf("已改写 %d 个文件，接着执行: cd server && go mod tidy\n", changed)
+		// 只改路径不重排分组：改写后的 kit 路径还留在原来 base/... 那一组里，编译没问题，看着别扭
+		fmt.Println("import 分组未重排（kit 路径留在原来 base/... 那一组），要归位跑: goimports -w .")
 	}
 
 	warnLeftovers(os.Stderr, roots, seen)

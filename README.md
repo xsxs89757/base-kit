@@ -4,7 +4,7 @@
 数据层与整套系统管理模块（用户 / 角色 / 菜单 / 部门 / 配置 / 操作日志）。
 
 项目从 base 模板派生，模板负责 `main.go`、业务代码和整个前端；框架层的 bug 修复和新功能
-走 `go get -u github.com/xsxs89757/base-kit`，不必再靠 git merge 一个个文件合。
+走 `go get github.com/xsxs89757/base-kit@latest`，不必再靠 git merge 一个个文件合。
 
 > 代码历史：这些包原先在 [xsxs89757/base](https://github.com/xsxs89757/base) 的 `server/internal/`
 > 下，`bf985b6` 之前的提交记录在那个仓库里。
@@ -44,6 +44,9 @@ func main() {
 
 只要数据层（定时任务、命令行工具）时用 `basekit.Bootstrap`；要拿到 `*fiber.App` 自己控制监听
 （测试、自定义 Listener）时用 `basekit.NewApp`。
+
+用 `Bootstrap` 时也把 `Seed: store.ProjectSeed` 传上（种子是幂等的）：模板垫片 `internal/store` 里的
+`store.DB` 是在 `ProjectSeed` 里赋值的，不传 Seed 它就是 nil。或者干脆在这类工具里直接用 kit 的 `store.DB`。
 
 ## 给基底的表加列
 
@@ -97,8 +100,9 @@ middleware.RegisterRoutePermissions(
 基底 v2.0.0 之前，这些包在模板的 `server/internal/` 下。同步到 v2.0.0 后跑一次导入路径改写：
 
 ```bash
-go run github.com/xsxs89757/base-kit/cmd/basekit-migrate@latest ./...
-cd server && go mod tidy
+cd server
+go run github.com/xsxs89757/base-kit/cmd/basekit-migrate ./...   # 版本跟随 go.mod 里钉的 kit
+go mod tidy
 ```
 
 `base/internal/router` 和 `base/internal/store` 不在改写范围内：模板 v2.0.0 之后

@@ -8,7 +8,7 @@
 //	    Routes: router.Setup,
 //	})
 //
-// 框架层的 bug 修复和新功能通过 go get -u github.com/xsxs89757/base-kit 获取，
+// 框架层的 bug 修复和新功能通过 go get github.com/xsxs89757/base-kit@latest 获取，
 // 不必再走 git merge。
 package basekit
 
@@ -95,11 +95,20 @@ func NewApp(opts Options) (*fiber.App, error) {
 			if e, ok := err.(*fiber.Error); ok {
 				code = e.Code
 			}
+			msg := err.Error()
+			if code >= fiber.StatusInternalServerError {
+				// 5xx 的原文可能带 DB 错误、文件路径（recover 中间件把 panic 也转成这种 error）：
+				// 日志里留全，生产模式对外只给一句通用的；开发模式保留原文方便调试
+				log.Printf("[%d] %s %s: %v", code, c.Method(), c.Path(), err)
+				if config.IsProduction() {
+					msg = "Internal Server Error"
+				}
+			}
 			return c.Status(code).JSON(fiber.Map{
 				"code":    -1,
 				"data":    nil,
-				"error":   err.Error(),
-				"message": err.Error(),
+				"error":   msg,
+				"message": msg,
 			})
 		},
 	}
