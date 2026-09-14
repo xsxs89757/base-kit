@@ -31,7 +31,8 @@ jobs:
     name: 迁移 (MySQL)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # kit 拥有全部模型，而「同一列两个未命名索引」这类建表问题只在 MySQL 上暴露
+    # kit 拥有全部模型，而「同一列两个未命名索引」这类建表问题、
+    # 「二进制/被切开的中文写不进 utf8mb4 列」这类写入问题只在 MySQL 上暴露
     services:
       mysql:
         image: mysql:8
@@ -47,7 +48,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: AutoMigrate + 种子数据
+      - name: AutoMigrate + 种子数据 + 操作日志写入
         env:
           BASEKIT_TEST_MYSQL_DSN: root:root@tcp(127.0.0.1:3306)/basekit_test?charset=utf8mb4&parseTime=True&loc=Local
-        run: go test ./store/ -run TestMySQL -v
+        run: go test ./store/ ./middleware/ -run TestMySQL -v

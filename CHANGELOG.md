@@ -15,6 +15,16 @@ base-kit 的版本记录。格式参考 Keep a Changelog，版本号遵循语义
   `PreRoutes` 的分组上挂了、请求又落到后面 kit 或 `Routes` 的路由，也是两遍。现在三个中间件同一请求只生效一次，
   已经重复挂载的下游升级后不改代码也只记一条。`PermissionAuth` 按 method + path 记放行，
   内部重定向（`c.Path(...)` 后 `RestartRouting`）到别的路由照样重新判定。
+- 操作日志在 MySQL 上记不下文件上传。multipart 请求体是二进制，utf8mb4 列在严格模式下拒绝整条 INSERT
+  （`Error 1366 Incorrect string value: '\x89PNG...'`），writer 只打一行日志，这条记录就没了；SQLite 上一切正常，
+  所以本地看不出来。现在上传请求改记表单摘要：普通字段照录（敏感字段照样脱敏，JSON 字符串字段里的也脱敏），
+  文件只记文件名、大小和类型，例如 `{"category":"头像","file":{"filename":"a.png","size":60016,"contentType":"image/png"}}`。
+- 同一根因的另外几种丢日志：请求体按字节截到 2KB，会切开中文等多字节字符（超过 2KB 的中文表单大概率整条丢失）；
+  path / User-Agent 超出列宽触发 `Error 1406`。现在按字符边界截断，所有列写库前统一替换非法 UTF-8、去掉 NUL、
+  按列宽截断。PostgreSQL 上是同样的问题（`SQLSTATE 22021` / `22001`），一并修好。
+- 操作日志条目直接持有 Fiber 返回的字符串，它们指向会被后续请求复用的缓冲区，而日志是后台 writer 异步写库的，
+  写库时可能已经变成别的请求的内容：并发时 method / path / User-Agent 会记错（实测 `DELETE /system/user/1`
+  被记成 `POSTTE /system/role/2`）。现在入队前拷贝。
 
 ### 文档
 
