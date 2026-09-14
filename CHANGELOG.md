@@ -7,6 +7,8 @@ base-kit 的版本记录。格式参考 Keep a Changelog，版本号遵循语义
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-09-14
+
 ### 修复
 
 - 下游在 `/admin` 下重复挂 `JWTAuth` / `PermissionAuth` / `OperationLog` 时，每个写操作记两条操作日志，
