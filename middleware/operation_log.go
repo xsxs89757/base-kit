@@ -68,9 +68,19 @@ func opLogCleanupLoop() {
 	}
 }
 
+// OperationLog 记录写操作（GET / OPTIONS 和 /swagger 不记），由后台 writer 异步写库。
+//
+// kit 已把它挂在 /admin 前缀上（见 router.SetupAdmin），/admin 下的路由不用再挂；
+// /api 等其他前缀、PreRoutes 里的路由需要时自己挂。同一请求只记一条：外层已经接手时，
+// 再次经过直接放行，见 request_once.go。
 func OperationLog() fiber.Handler {
 	opLogOnce.Do(startOpLogWriter)
 	return func(c *fiber.Ctx) error {
+		if c.Locals(operationLogStarted) != nil {
+			return c.Next()
+		}
+		c.Locals(operationLogStarted, true)
+
 		if c.Method() == "GET" || c.Method() == "OPTIONS" {
 			return c.Next()
 		}

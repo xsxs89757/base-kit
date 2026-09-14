@@ -74,15 +74,39 @@ AutoMigrate 只增不删，kit 先建表、这个结构随后迁移同一张表�
 
 ## 覆盖基底的接口
 
-Fiber 先注册先匹配，在 `PreRoutes` 里注册同样的方法和路径即可：
+Fiber 先注册先匹配，在 `PreRoutes` 里注册同样的方法和路径即可。`PreRoutes` 排在 kit 的 `/admin`
+中间件前面，命中后不会再经过它们，**鉴权、权限码、操作日志要自己挂**，否则这个接口不用登录就能调：
 
 ```go
 basekit.Run(basekit.Options{
     PreRoutes: func(app *fiber.App) {
-        app.Get("/admin/system/user/list", myUserList) // 盖掉 kit 的实现
+        // 盖掉 kit 的实现
+        app.Put("/admin/system/user/:id",
+            middleware.JWTAuth(), middleware.PermissionAuth(), middleware.OperationLog(), myUpdateUser)
     },
 })
 ```
+
+## 下游路由的中间件
+
+kit 把 `JWTAuth`、`PermissionAuth`、`OperationLog` 挂在 `/admin` **前缀**上（见 `router.SetupAdmin`），
+之后注册的 `/admin` 路由不挂也会鉴权、校验权限码、记操作日志（POST/PUT/DELETE）：
+
+| 路由 | 这三个中间件 |
+| --- | --- |
+| `Routes` 里的 `/admin/*` | 已经挂好，**不要再挂** |
+| `PreRoutes` 里的 `/admin/*` | 不经过，要自己挂（见上一节） |
+| `/api` 等其他前缀 | 不经过，需要时自己挂 |
+
+```go
+Routes: func(app *fiber.App) {
+    shop := app.Group("/admin/shop") // 不要写成 app.Group("/admin/shop", middleware.JWTAuth(), ...)
+    shop.Get("/order/list", listOrders)
+    shop.Put("/order/:id", updateOrder)
+},
+```
+
+重复挂载时三个中间件同一请求只生效一次，不会多记日志，但也没有意义。
 
 ## 下游路由的权限码
 

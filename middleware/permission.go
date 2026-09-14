@@ -121,10 +121,22 @@ func RegisterAuthenticatedRoutes(routes ...RoutePermission) {
 // 判定顺序：内置超管(id=1) 或持 super 角色 → 放行；仅需登录的路由 → 放行；
 // 路由登记了权限码且用户角色持有该码 → 放行；其余 403。
 // 角色来自 JWTAuth 从数据库装配的 Locals("roles")，不重复查库。
+//
+// kit 已把它挂在 /admin 前缀上，/admin 下的路由不用再挂；同一请求对同一 method+path 只判定一次，
+// 内部重定向（c.Path 改写后 RestartRouting）到别的路由会重新判定，见 request_once.go。
 func PermissionAuth() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		if isSuperAdminUser(c) {
+		obj := c.Path()
+		act := c.Method()
+		// 拼出来的是新字符串。c.Path() 指向 c.Path(override) 会原地改写的缓冲区，直接存它，
+		// 重定向到等长路径后读出来就是新路径，判定会被跳过
+		route := act + " " + obj
+		if c.Locals(permissionGranted) == route {
 			return c.Next()
+		}
+
+		if isSuperAdminUser(c) {
+			return grantPermission(c, route)
 		}
 
 		roles, ok := c.Locals("roles").([]string)
@@ -137,20 +149,17 @@ func PermissionAuth() fiber.Handler {
 			})
 		}
 
-		obj := c.Path()
-		act := c.Method()
-
 		if hasRole(roles, "super") {
-			return c.Next()
+			return grantPermission(c, route)
 		}
 
 		if matchesRoute(authenticatedRoutes, act, obj) {
-			return c.Next()
+			return grantPermission(c, route)
 		}
 
 		code, ok := permissionCodeForRoute(act, obj)
 		if ok && roleHasPermissionCode(roles, code) {
-			return c.Next()
+			return grantPermission(c, route)
 		}
 
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
@@ -160,6 +169,12 @@ func PermissionAuth() fiber.Handler {
 			"message": "没有权限执行此操作",
 		})
 	}
+}
+
+// grantPermission 记下本请求已按 route 放行，再往下走。
+func grantPermission(c *fiber.Ctx, route string) error {
+	c.Locals(permissionGranted, route)
+	return c.Next()
 }
 
 // CasbinAuth 是 PermissionAuth 的旧名。

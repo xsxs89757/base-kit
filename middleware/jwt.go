@@ -107,8 +107,14 @@ func unauthorized(c *fiber.Ctx) error {
 // 用户是否存在/启用、当前启用的角色、改密后旧 token 作废。
 // token 里的 roles claim 只是签发时的快照，不再作为鉴权依据——否则禁用用户、调整角色
 // 都要等 token 过期（默认 7 天）才生效。查询结果带 TTL 缓存，见 user_cache.go。
+//
+// kit 已把它挂在 /admin 前缀上，/admin 下的路由不用再挂；同一请求里只校验一次，见 request_once.go。
 func JWTAuth() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		if c.Locals(jwtAuthDone) != nil {
+			return c.Next()
+		}
+
 		auth := c.Get("Authorization")
 		if auth == "" {
 			return unauthorized(c)
@@ -143,6 +149,7 @@ func JWTAuth() fiber.Handler {
 		c.Locals("userId", claims.UserID)
 		c.Locals("username", entry.username)
 		c.Locals("roles", entry.roles)
+		c.Locals(jwtAuthDone, true)
 		return c.Next()
 	}
 }

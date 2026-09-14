@@ -7,6 +7,21 @@ base-kit 的版本记录。格式参考 Keep a Changelog，版本号遵循语义
 
 ## [Unreleased]
 
+### 修复
+
+- 下游在 `/admin` 下重复挂 `JWTAuth` / `PermissionAuth` / `OperationLog` 时，每个写操作记两条操作日志，
+  鉴权和权限码也各跑两遍。`SetupAdmin` 把这三个中间件挂在 `/admin` 前缀上，`Routes` 里注册的 `/admin` 路由
+  本来就经过它们，而模板 `router/project.go` 的注释让下游「参考 admin.go 中 protected 分组的中间件挂法」再挂一遍；
+  `PreRoutes` 的分组上挂了、请求又落到后面 kit 或 `Routes` 的路由，也是两遍。现在三个中间件同一请求只生效一次，
+  已经重复挂载的下游升级后不改代码也只记一条。`PermissionAuth` 按 method + path 记放行，
+  内部重定向（`c.Path(...)` 后 `RestartRouting`）到别的路由照样重新判定。
+
+### 文档
+
+- README「覆盖基底的接口」的示例漏挂中间件：`PreRoutes` 排在 kit 的 `/admin` 中间件前面，照抄出来的接口
+  不用登录就能调。示例补上三个中间件；新增「下游路由的中间件」一节，说明哪些路由已经挂好、哪些要自己挂。
+  `SetupAdmin`、`Options.PreRoutes` / `Routes` 和三个中间件的注释同步写明。
+
 ## [1.0.3] - 2026-09-02
 
 ### 变更

@@ -46,9 +46,12 @@ type Options struct {
 
 	// PreRoutes 在基底 /admin 路由之前注册。Fiber 先注册先匹配，
 	// 想覆盖基底某个接口就在这里注册同样的方法和路径。
+	// 这里的路由排在 kit 的 JWTAuth / PermissionAuth / OperationLog 前面，命中后不会再经过它们，要自己挂。
 	PreRoutes func(app *fiber.App)
 	// Routes 在基底路由之后注册，放下游自己的业务路由。
 	// 需要权限码的路由记得用 middleware.RegisterRoutePermissions 登记。
+	// /admin 下的路由已经经过 kit 挂在 /admin 前缀上的 JWTAuth / PermissionAuth / OperationLog，
+	// 不要再挂；/api 等其他前缀需要时自己挂。
 	Routes func(app *fiber.App)
 
 	// Swagger 仅在 config 的 enable_swagger 为 true 时调用，由下游挂载 UI。
