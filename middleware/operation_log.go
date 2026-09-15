@@ -150,13 +150,13 @@ func startOpLogWriter() {
 			}
 		}
 	}()
-	go opLogCleanupLoop()
+	// 配置在这里读好再传进去：goroutine 里读 config.C 会和下一次 Bootstrap 重写它竞争（测试里多次 NewApp）
+	go opLogCleanupLoop(config.C.Server.OpLogRetentionDays)
 }
 
 // opLogCleanupLoop 每天清理一次超过保留天数的日志；
 // server.op_log_retention_days <= 0 时永久保留（默认行为，与历史一致）。
-func opLogCleanupLoop() {
-	days := config.C.Server.OpLogRetentionDays
+func opLogCleanupLoop(days int) {
 	if days <= 0 {
 		return
 	}
