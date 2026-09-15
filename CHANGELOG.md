@@ -7,6 +7,21 @@ base-kit 的版本记录。格式参考 Keep a Changelog，版本号遵循语义
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-15
+
+### 新增
+
+- `basekit.Go(app, fn)`：起一个随 app 关闭而停止的后台任务。`app.Shutdown()` 时 ctx 取消，等任务返回
+  （最多 10 秒）后 Shutdown 才返回；`basekit.AppContext(app)` 只取这个 ctx。用法见 README「后台任务」。
+  下游在 `Routes` 里用 `go fn(context.Background())` 起常驻 goroutine 时，测试里每次 `NewApp` 都会叠一份：
+  `store.DB` 是包级变量，前一个 app 的任务不会退出，而是转去读写新 app 的库。下游真实案例：一个测试包里
+  7 个测试各 `NewApp` 一次，回调投递 worker 同时跑 7 份，同一条回调发两遍，CI 时好时坏。
+
+### 修复
+
+- 同一进程多次 `NewApp`（测试）时，`go test -race` 偶发报数据竞争：操作日志的清理 goroutine 读
+  `config.C`，下一次 `Bootstrap` 同时在重写它。现在启动时读好保留天数再传给 goroutine，行为不变。
+
 ## [1.0.4] - 2026-09-14
 
 ### 修复
