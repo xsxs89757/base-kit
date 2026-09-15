@@ -119,6 +119,30 @@ middleware.RegisterRoutePermissions(
 未登记的 `/admin` 路由对非 super 用户一律 403（默认拒绝）。只需登录不校验权限码的用
 `middleware.RegisterAuthenticatedRoutes`。注册要在 `basekit.Run` 之前或 `Routes` 回调里完成。
 
+## 后台任务
+
+定时扫描、投递 worker 这类常驻 goroutine，在 `Routes` 里用 `basekit.Go` 起，**不要**
+`go fn(context.Background())`：
+
+```go
+Routes: func(app *fiber.App) {
+    basekit.Go(app, callback.NewWorker(log).Run) // 签名是 func(ctx context.Context) 的直接传
+    basekit.Go(app, func(ctx context.Context) {
+        sweepSessions(ctx, log)
+    })
+},
+```
+
+`app.Shutdown()` 时 ctx 取消，等任务返回后 Shutdown 才返回（最多等 10 秒），所以任务要在 ctx 取消后
+尽快返回。只要一个随 app 关闭而取消的 ctx（交给自己管 goroutine 的组件）时用 `basekit.AppContext(app)`。
+
+`context.Background()` 的问题在测试里暴露：`store.DB` 是包级变量，每次 `NewApp` 都换成新库，
+前一个 app 起的任务不会退出，而是转去读写新 app 的库。一个测试包里 N 个测试各 `NewApp` 一次，
+同一个 worker 就同时跑 N 份——下游真实案例：回调投递 worker 叠了 7 份，同一条回调发两遍，CI 时好时坏。
+测试里记得 `t.Cleanup(func() { _ = app.Shutdown() })`，并排在关库之后注册（`t.Cleanup` 后注册的先执行）。
+
+`basekit.Run` 收到退出信号时直接结束进程，这一点没变；生产上要优雅退出，自己接管信号并调 `app.ShutdownWithTimeout`。
+
 ## 从模板迁移
 
 基底 v2.0.0 之前，这些包在模板的 `server/internal/` 下。同步到 v2.0.0 后跑一次导入路径改写：
