@@ -1,6 +1,7 @@
 package store
 
 import (
+	"github.com/xsxs89757/base-kit/config"
 	adminmodel "github.com/xsxs89757/base-kit/model/admin"
 
 	"reflect"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -123,5 +125,66 @@ func TestSeedUsersRenamesLegacyRootAccountToSuper(t *testing.T) {
 	DB.Model(&adminmodel.User{}).Where("username = ?", "super").Count(&count)
 	if count != 1 {
 		t.Fatalf("expected exactly one super user, got %d", count)
+	}
+}
+
+func TestSeedUsersProductionSeedsOnlySuperWithRandomPassword(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(t.TempDir()+"/test.db"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	if err := db.AutoMigrate(&adminmodel.User{}, &adminmodel.Role{}); err != nil {
+		t.Fatalf("migrate test db: %v", err)
+	}
+	DB = db
+	prevMode := config.C.Server.Mode
+	config.C.Server.Mode = "production"
+	t.Cleanup(func() { config.C.Server.Mode = prevMode })
+
+	for _, code := range []string{"super", "admin", "user"} {
+		if err := DB.Create(&adminmodel.Role{Name: code, Code: code, Status: 1}).Error; err != nil {
+			t.Fatalf("create role %s: %v", code, err)
+		}
+	}
+
+	seedUsers()
+
+	var users []adminmodel.User
+	DB.Find(&users)
+	if len(users) != 1 || users[0].Username != "super" {
+		t.Fatalf("production must seed only super, got %+v", users)
+	}
+	if bcrypt.CompareHashAndPassword([]byte(users[0].Password), []byte(DefaultSeedPassword)) == nil {
+		t.Fatal("production super must not use the default seed password")
+	}
+}
+
+func TestSeedUsersDoesNotReviveSoftDeletedAccount(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(t.TempDir()+"/test.db"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	if err := db.AutoMigrate(&adminmodel.User{}, &adminmodel.Role{}); err != nil {
+		t.Fatalf("migrate test db: %v", err)
+	}
+	DB = db
+	prevMode := config.C.Server.Mode
+	config.C.Server.Mode = "development"
+	t.Cleanup(func() { config.C.Server.Mode = prevMode })
+
+	for _, code := range []string{"super", "admin", "user"} {
+		DB.Create(&adminmodel.Role{Name: code, Code: code, Status: 1})
+	}
+	seedUsers()
+	if err := DB.Where("username = ?", "admin").Delete(&adminmodel.User{}).Error; err != nil {
+		t.Fatalf("soft delete admin: %v", err)
+	}
+
+	seedUsers()
+
+	var alive int64
+	DB.Model(&adminmodel.User{}).Where("username = ?", "admin").Count(&alive)
+	if alive != 0 {
+		t.Fatalf("soft-deleted admin was revived by seeding (%d live rows)", alive)
 	}
 }

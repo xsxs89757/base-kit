@@ -2,6 +2,9 @@ package admin
 
 import (
 	"errors"
+	"fmt"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/xsxs89757/base-kit/config"
@@ -27,6 +30,7 @@ import (
 // @Success 200 {object} dto.Response{data=admindto.LoginResponse}
 // @Failure 400 {object} dto.Response
 // @Failure 403 {object} dto.Response
+// @Failure 429 {object} dto.Response
 // @Router /admin/auth/login [post]
 func Login(c *fiber.Ctx) error {
 	var req admindto.LoginRequest
@@ -34,10 +38,18 @@ func Login(c *fiber.Ctx) error {
 		return err
 	}
 
+	ip := loginClientIP(c)
+	if wait := adminsvc.LoginLockedFor(req.Username, ip); wait > 0 {
+		return dto.Fail(c, fiber.StatusTooManyRequests,
+			fmt.Sprintf("Too many failed login attempts, try again in %d minutes.", int(wait.Minutes())+1))
+	}
+
 	user, err := adminsvc.Authenticate(req.Username, req.Password)
 	if err != nil {
+		adminsvc.RecordLoginFailure(req.Username, ip)
 		return dto.Fail(c, fiber.StatusForbidden, "Username or password is incorrect.")
 	}
+	adminsvc.RecordLoginSuccess(req.Username, ip)
 
 	roles := adminsvc.GetRoleNames(user)
 	accessToken, err := middleware.GenerateAccessToken(user.ID, user.Username, roles)
@@ -263,4 +275,17 @@ func resolveAccessibleHomePath(user *adminmodel.User) string {
 	}
 
 	return user.HomePath
+}
+
+// loginClientIP 取登录请求的真实来源。生产在 nginx 之后，直连地址恒为 127.0.0.1，
+// 只有直连方是本机反代时才信 X-Real-IP（nginx 用 $remote_addr 覆盖写入，客户端伪造不了）；
+// 直连服务端口的请求一律用直连地址，防止伪造请求头绕过按 IP 的登录闸。
+func loginClientIP(c *fiber.Ctx) string {
+	direct := c.IP()
+	if ip := net.ParseIP(direct); ip != nil && ip.IsLoopback() {
+		if real := net.ParseIP(strings.TrimSpace(c.Get("X-Real-IP"))); real != nil {
+			return real.String()
+		}
+	}
+	return direct
 }

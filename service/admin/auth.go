@@ -1,8 +1,11 @@
 package admin
 
 import (
+	"errors"
+	"log"
 	"time"
 
+	"github.com/xsxs89757/base-kit/config"
 	adminmodel "github.com/xsxs89757/base-kit/model/admin"
 	"github.com/xsxs89757/base-kit/store"
 
@@ -17,8 +20,16 @@ func Authenticate(username, password string) (*adminmodel.User, error) {
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
 		return nil, err
 	}
+	// 生产环境不认默认种子密码：哪怕库里的哈希对得上，也当作登录失败，逼运维先改密码
+	if config.IsProduction() && password == store.DefaultSeedPassword {
+		log.Printf("[auth] WARN: login rejected for %q: account still uses the default seed password", username)
+		return nil, ErrDefaultPassword
+	}
 	return &user, nil
 }
+
+// ErrDefaultPassword 生产环境用默认种子密码登录（对外与密码错误同一提示）。
+var ErrDefaultPassword = errors.New("default seed password is not allowed in production")
 
 func GetUserByID(id uint) (*adminmodel.User, error) {
 	var user adminmodel.User

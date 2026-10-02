@@ -1,6 +1,7 @@
 package store
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log"
@@ -410,7 +411,22 @@ func SyncSeedMenu(menu adminmodel.Menu, parentName string) (adminmodel.Menu, boo
 
 // --- Users ---
 
-const defaultSeedPassword = "123456"
+// DefaultSeedPassword 是开发/演示环境的种子密码。生产模式既不用它建号，
+// 也拒绝用它登录（见 service/admin.Authenticate），防止存量库沿用默认密码。
+const DefaultSeedPassword = "123456"
+
+// randomSeedPassword 生成生产首建超管用的随机初始密码（20 位，字母数字）。
+func randomSeedPassword() string {
+	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+	buf := make([]byte, 20)
+	if _, err := rand.Read(buf); err != nil {
+		log.Fatalf("generate seed password: %v", err)
+	}
+	for i, b := range buf {
+		buf[i] = alphabet[int(b)%len(alphabet)]
+	}
+	return string(buf)
+}
 
 func seedUsers() {
 	renameLegacyRootUser()
@@ -430,12 +446,19 @@ func seedUsers() {
 		userDefs = userDefs[:1]
 	}
 
+	production := config.IsProduction()
 	for _, u := range userDefs {
 		var exists adminmodel.User
-		if DB.Where("username = ?", u.Username).First(&exists).Error == nil {
+		// Unscoped：被软删的账号也算存在，不能因为管理员删了它就在下次启动时按默认密码复活
+		if DB.Unscoped().Where("username = ?", u.Username).First(&exists).Error == nil {
 			continue
 		}
-		hash, _ := bcrypt.GenerateFromPassword([]byte(defaultSeedPassword), bcrypt.DefaultCost)
+		password := DefaultSeedPassword
+		if production {
+			// 生产库首建超管用随机密码，只在启动日志里出现一次
+			password = randomSeedPassword()
+		}
+		hash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		var role adminmodel.Role
 		if DB.Where("code = ?", u.RoleCode).First(&role).Error != nil {
 			log.Printf("  [seed] skip user %s: role %s not found", u.Username, u.RoleCode)
@@ -449,8 +472,15 @@ func seedUsers() {
 			HomePath: u.HomePath,
 			Roles:    []adminmodel.Role{role},
 		}
-		DB.Create(&user)
-		log.Printf("  [seed] user created: %s", u.Username)
+		if err := DB.Create(&user).Error; err != nil {
+			log.Printf("  [seed] create user %s failed: %v", u.Username, err)
+			continue
+		}
+		if production {
+			log.Printf("  [seed] user created: %s, initial password: %s (shown once, change it after first login)", u.Username, password)
+		} else {
+			log.Printf("  [seed] user created: %s", u.Username)
+		}
 	}
 
 	// 早期种子把 jack 的首页指向已删除的 /analytics，统一迁到 /workspace
@@ -466,8 +496,8 @@ func warnDefaultSuperPassword() {
 	if DB.Select("id", "password").Where("username = ?", "super").First(&super).Error != nil {
 		return
 	}
-	if bcrypt.CompareHashAndPassword([]byte(super.Password), []byte(defaultSeedPassword)) == nil {
-		log.Printf("  [seed] WARN: user 'super' still uses the default password %s, change it before exposing this service", defaultSeedPassword)
+	if bcrypt.CompareHashAndPassword([]byte(super.Password), []byte(DefaultSeedPassword)) == nil {
+		log.Printf("  [seed] WARN: user 'super' still uses the default password %s; production mode refuses this password at login, change it now", DefaultSeedPassword)
 	}
 }
 
