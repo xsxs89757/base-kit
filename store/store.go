@@ -212,10 +212,15 @@ func seedRoles() {
 	}
 	for _, r := range roles {
 		var exists adminmodel.Role
-		if DB.Where("code = ?", r.Code).First(&exists).Error != nil {
-			DB.Create(&r)
-			log.Printf("  [seed] role created: %s", r.Code)
+		// Unscoped：管理员删掉的角色不随重启复活（与 seedUsers 同理）
+		if DB.Unscoped().Where("code = ?", r.Code).First(&exists).Error == nil {
+			continue
 		}
+		if err := DB.Create(&r).Error; err != nil {
+			log.Printf("  [seed] create role %s failed: %v", r.Code, err)
+			continue
+		}
+		log.Printf("  [seed] role created: %s", r.Code)
 	}
 }
 
