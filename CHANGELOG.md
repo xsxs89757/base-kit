@@ -7,6 +7,8 @@ base-kit 的版本记录。格式参考 Keep a Changelog，版本号遵循语义
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-02
+
 ### 安全
 
 - 生产模式（`server.mode: production`）首次建库时，内置超管 `super` 改用 20 位随机初始密码，只在启动日志里
