@@ -15,9 +15,11 @@ package basekit
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/xsxs89757/base-kit/config"
 	"github.com/xsxs89757/base-kit/router"
+	adminsvc "github.com/xsxs89757/base-kit/service/admin"
 	"github.com/xsxs89757/base-kit/store"
 	"github.com/xsxs89757/base-kit/validator"
 
@@ -158,7 +160,21 @@ func NewApp(opts Options) (*fiber.App, error) {
 }
 
 // Run 组装并启动服务，出错直接终止进程——它是 main 的最后一行，没有调用方能处理错误。
+//
+// 带子命令时只执行命令、不起服务：
+//
+//	<server> reset-password [用户名]   把账号（默认 super）重置为随机强口令并打印出来
+//
+// 用于超管忘记密码、或生产模式因弱口令被拦在登录页外（后台里没有别人能替它重置）。
+// 在服务所在目录、以服务的运行用户执行，读同一份 config.yaml。
 func Run(opts Options) {
+	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
+		if err := resetPassword(opts, os.Args[2:]); err != nil {
+			log.Fatalf("reset-password: %v", err)
+		}
+		return
+	}
+
 	app, err := NewApp(opts)
 	if err != nil {
 		log.Fatalf("启动失败: %v", err)
@@ -166,4 +182,28 @@ func Run(opts Options) {
 	addr := fmt.Sprintf(":%d", config.C.Server.Port)
 	log.Printf("Server starting on %s", addr)
 	log.Fatal(app.Listen(addr))
+}
+
+func resetPassword(opts Options, args []string) error {
+	username := "super"
+	if len(args) > 0 && args[0] != "" {
+		username = args[0]
+	}
+	if err := Bootstrap(opts); err != nil {
+		return err
+	}
+	user, err := adminsvc.GetUserByUsername(username)
+	if err != nil {
+		return fmt.Errorf("找不到用户 %s: %w", username, err)
+	}
+	password := store.RandomPassword()
+	if err := adminsvc.ChangePassword(user.ID, password); err != nil {
+		return err
+	}
+	fmt.Printf("\n用户 %s 的密码已重置为: %s\n登录后请尽快在右上角「修改密码」改成自己的密码。\n", username, password)
+	if user.Status != 1 {
+		fmt.Printf("注意: 该账号当前是禁用状态，仍然登录不了。\n")
+	}
+	fmt.Printf("若该账号刚因多次登录失败被锁定，需等锁定结束（最长 15 分钟）或重启服务。\n")
+	return nil
 }

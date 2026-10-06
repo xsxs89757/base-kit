@@ -20,9 +20,68 @@ import (
 	"gorm.io/gorm"
 )
 
+// GetCaptcha 获取登录拼图验证码
+// @Summary 获取登录拼图验证码
+// @Description 系统配置 login_captcha 开启时返回一张拼图（带缺口的背景图 + 拼图块，2 分钟有效，只能提交一次）；关闭时只返回 enabled=false
+// @Tags 认证
+// @Produce json
+// @Success 200 {object} dto.Response{data=admindto.CaptchaResponse}
+// @Failure 500 {object} dto.Response
+// @Router /admin/auth/captcha [get]
+func GetCaptcha(c *fiber.Ctx) error {
+	// 每次都要新图：不让浏览器或中间代理缓存
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	if !adminsvc.CaptchaEnabled() {
+		return dto.Success(c, admindto.CaptchaResponse{Enabled: false})
+	}
+	p, err := adminsvc.GenerateCaptcha()
+	if err != nil {
+		return dto.Fail(c, fiber.StatusInternalServerError, "Failed to generate captcha")
+	}
+	return dto.Success(c, admindto.CaptchaResponse{
+		Enabled:   true,
+		CaptchaID: p.ID,
+		Image:     p.Image,
+		Piece:     p.Piece,
+		PieceY:    p.PieceY,
+		PieceSize: adminsvc.PuzzlePieceSize,
+		Width:     adminsvc.PuzzleWidth,
+		Height:    adminsvc.PuzzleHeight,
+	})
+}
+
+// VerifyCaptcha 校验拼图位置
+// @Summary 校验拼图位置
+// @Description 提交拼图块拖到的横坐标，通过时返回一次性登录凭证（2 分钟有效）。拼图提交一次即作废；失败计入来源 IP 的登录失败次数，超限返回 429
+// @Tags 认证
+// @Accept json
+// @Produce json
+// @Param request body admindto.CaptchaVerifyRequest true "拼图位置"
+// @Success 200 {object} dto.Response{data=admindto.CaptchaVerifyResponse}
+// @Failure 400 {object} dto.Response
+// @Failure 429 {object} dto.Response
+// @Router /admin/auth/captcha/verify [post]
+func VerifyCaptcha(c *fiber.Ctx) error {
+	var req admindto.CaptchaVerifyRequest
+	if err := validator.BindAndValidate(c, &req); err != nil {
+		return err
+	}
+	ip := loginClientIP(c)
+	if wait := adminsvc.CaptchaLockedFor(ip); wait > 0 {
+		return dto.Fail(c, fiber.StatusTooManyRequests,
+			fmt.Sprintf("Too many failed attempts, try again in %d minutes.", int(wait.Minutes())+1))
+	}
+	token, ok := adminsvc.VerifyCaptchaSlide(req.CaptchaID, req.X)
+	if !ok {
+		adminsvc.RecordCaptchaFailure(ip)
+		return dto.Fail(c, fiber.StatusBadRequest, "验证失败，请重试")
+	}
+	return dto.Success(c, admindto.CaptchaVerifyResponse{Token: token})
+}
+
 // Login 用户登录
 // @Summary 用户登录
-// @Description 使用用户名和密码登录，返回 accessToken
+// @Description 使用用户名和密码登录，返回 accessToken；系统配置 login_captcha 开启时还须带上拼图验证通过后拿到的 captchaToken
 // @Tags 认证
 // @Accept json
 // @Produce json
@@ -42,6 +101,11 @@ func Login(c *fiber.Ctx) error {
 	if wait := adminsvc.LoginLockedFor(req.Username, ip); wait > 0 {
 		return dto.Fail(c, fiber.StatusTooManyRequests,
 			fmt.Sprintf("Too many failed login attempts, try again in %d minutes.", int(wait.Minutes())+1))
+	}
+
+	// 拼图凭证先于口令校验：没有有效凭证就不去碰口令（拖错拼图已在 VerifyCaptcha 计过失败次数）
+	if adminsvc.CaptchaEnabled() && !adminsvc.ConsumeCaptchaToken(req.CaptchaToken) {
+		return dto.Fail(c, fiber.StatusBadRequest, "请先完成安全验证")
 	}
 
 	user, err := adminsvc.Authenticate(req.Username, req.Password)
@@ -182,6 +246,9 @@ func ChangePassword(c *fiber.Ctx) error {
 
 	if err := adminsvc.VerifyPassword(user, req.OldPassword); err != nil {
 		return dto.Fail(c, fiber.StatusForbidden, "旧密码不正确")
+	}
+	if err := adminsvc.CheckPasswordStrength(req.NewPassword, user.Username); err != nil {
+		return dto.Fail(c, fiber.StatusBadRequest, err.Error())
 	}
 
 	if err := adminsvc.ChangePassword(userID, req.NewPassword); err != nil {

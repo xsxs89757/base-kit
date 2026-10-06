@@ -420,17 +420,28 @@ func SyncSeedMenu(menu adminmodel.Menu, parentName string) (adminmodel.Menu, boo
 // 也拒绝用它登录（见 service/admin.Authenticate），防止存量库沿用默认密码。
 const DefaultSeedPassword = "123456"
 
-// randomSeedPassword 生成生产首建超管用的随机初始密码（20 位，字母数字）。
-func randomSeedPassword() string {
+// RandomPassword 生成随机口令（20 位字母数字，去掉易混字符），用于生产首建超管和 reset-password 命令。
+// 保证同时含字母和数字：生产登录会拦截不合口令策略的密码，纯字母的随机口令会把超管锁在门外。
+func RandomPassword() string {
 	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
 	buf := make([]byte, 20)
-	if _, err := rand.Read(buf); err != nil {
-		log.Fatalf("generate seed password: %v", err)
+	for {
+		if _, err := rand.Read(buf); err != nil {
+			log.Fatalf("generate random password: %v", err)
+		}
+		var hasLetter, hasDigit bool
+		for i, b := range buf {
+			buf[i] = alphabet[int(b)%len(alphabet)]
+			if buf[i] >= '2' && buf[i] <= '9' {
+				hasDigit = true
+			} else {
+				hasLetter = true
+			}
+		}
+		if hasLetter && hasDigit {
+			return string(buf)
+		}
 	}
-	for i, b := range buf {
-		buf[i] = alphabet[int(b)%len(alphabet)]
-	}
-	return string(buf)
 }
 
 func seedUsers() {
@@ -446,9 +457,11 @@ func seedUsers() {
 		{"admin", "Admin", "admin", "/workspace"},
 		{"jack", "Jack", "user", "/workspace"},
 	}
-	// 生产库只种内置超管：admin/jack 是演示账号，密码人尽皆知，不该出现在线上
+	// 生产库只种内置超管：admin/jack 是演示账号，密码人尽皆知，不该出现在线上；
+	// 老库里残留的（曾用开发模式启动过、或早期版本种下的）也一并删掉
 	if config.IsProduction() {
 		userDefs = userDefs[:1]
+		purgeDemoUsers()
 	}
 
 	production := config.IsProduction()
@@ -461,7 +474,7 @@ func seedUsers() {
 		password := DefaultSeedPassword
 		if production {
 			// 生产库首建超管用随机密码，只在启动日志里出现一次
-			password = randomSeedPassword()
+			password = RandomPassword()
 		}
 		hash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		var role adminmodel.Role
@@ -492,6 +505,33 @@ func seedUsers() {
 	DB.Model(&adminmodel.User{}).Where("home_path = ?", "/analytics").Update("home_path", "/workspace")
 
 	warnDefaultSuperPassword()
+}
+
+// demoUsernames 是开发模式种下的演示账号，生产库启动时清除。
+var demoUsernames = []string{"admin", "jack"}
+
+// purgeDemoUsers 物理删除演示账号及其角色关联，不论密码是否改过：线上只保留内置超管，
+// 真正需要的账号由超管在后台另建（用户名别再叫 admin/jack，否则每次启动都会被删）。id=1 的内置超管永不删除。
+func purgeDemoUsers() {
+	var users []adminmodel.User
+	if err := DB.Unscoped().Select("id", "username").Where("username IN ? AND id <> ?", demoUsernames, 1).Find(&users).Error; err != nil {
+		log.Printf("  [seed] scan demo users failed: %v", err)
+		return
+	}
+	for _, u := range users {
+		err := DB.Transaction(func(tx *gorm.DB) error {
+			// 先删关联行再删主行：user_roles 对 sys_users 有外键
+			if err := tx.Where("user_id = ?", u.ID).Delete(&adminmodel.UserRole{}).Error; err != nil {
+				return err
+			}
+			return tx.Unscoped().Delete(&adminmodel.User{}, u.ID).Error
+		})
+		if err != nil {
+			log.Printf("  [seed] delete demo user %s failed: %v", u.Username, err)
+			continue
+		}
+		log.Printf("  [seed] production: demo user %q (id=%d) deleted", u.Username, u.ID)
+	}
 }
 
 // warnDefaultSuperPassword 每次启动检查内置超管是否还在用种子密码，命中则打 WARN。
@@ -560,18 +600,30 @@ func seedDepts() {
 
 func seedConfigs() {
 	defs := []adminmodel.Config{
-		{ConfigKey: "site_name", ConfigValue: "Admin 后台管理系统", ConfigGroup: "basic", Status: 1, Remark: "站点名称"},
-		{ConfigKey: "site_logo", ConfigValue: "/logo.png", ConfigGroup: "basic", Status: 1, Remark: "站点 Logo"},
-		{ConfigKey: "upload_max_size", ConfigValue: "10", ConfigGroup: "upload", Status: 1, Remark: "上传文件最大大小(MB)"},
-		{ConfigKey: "login_captcha", ConfigValue: "false", ConfigGroup: "security", Status: 1, Remark: "登录是否需要验证码"},
-		{ConfigKey: "password_min_length", ConfigValue: "6", ConfigGroup: "security", Status: 1, Remark: "密码最小长度"},
+		{ConfigName: "站点名称", ConfigKey: "site_name", ConfigValue: "Admin 后台管理系统", ConfigGroup: "basic", Status: 1, Remark: "站点名称"},
+		{ConfigName: "站点 Logo", ConfigKey: "site_logo", ConfigValue: "/logo.png", ConfigGroup: "basic", Status: 1, Remark: "站点 Logo"},
+		{ConfigName: "上传大小上限", ConfigKey: "upload_max_size", ConfigValue: "10", ConfigGroup: "upload", Status: 1, Remark: "上传文件最大大小(MB)"},
+		// 生产新库默认开验证码；开发库默认关，免得本地调试每次都要输。已有库保留原值，按需在后台改
+		{ConfigName: "登录验证码", ConfigKey: "login_captcha", ConfigValue: loginCaptchaDefault(), ConfigGroup: "security", Status: 1, Remark: "后台登录是否需要图形验证码（true/false）"},
+		{ConfigName: "密码最小长度", ConfigKey: "password_min_length", ConfigValue: "8", ConfigGroup: "security", Status: 1, Remark: "设置密码时的最小长度（不低于 8，只约束新密码）"},
 	}
 	for _, cfg := range defs {
 		var exists adminmodel.Config
 		if DB.Where("config_key = ?", cfg.ConfigKey).First(&exists).Error == nil {
+			// 早期种子没填名称，而后台编辑配置要求名称必填，不补上就改不了这些配置
+			if exists.ConfigName == "" {
+				DB.Model(&exists).Update("config_name", cfg.ConfigName)
+			}
 			continue
 		}
 		DB.Create(&cfg)
 		log.Printf("  [seed] config created: %s", cfg.ConfigKey)
 	}
+}
+
+func loginCaptchaDefault() string {
+	if config.IsProduction() {
+		return "true"
+	}
+	return "false"
 }

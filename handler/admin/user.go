@@ -94,6 +94,10 @@ func CreateUser(c *fiber.Ctx) error {
 
 	user := adminsvc.NewUser(req.Username, req.Password, req.RealName, req.Email, req.Phone, req.Status, req.Remark)
 	if err := adminsvc.CreateUser(user, req.RoleIDs); err != nil {
+		var policyErr *adminsvc.PasswordPolicyError
+		if errors.As(err, &policyErr) {
+			return dto.Fail(c, fiber.StatusBadRequest, policyErr.Error())
+		}
 		if store.IsUniqueViolation(err) {
 			return dto.Fail(c, fiber.StatusBadRequest, "用户名已存在")
 		}
@@ -111,7 +115,10 @@ func mayMutateUser(c *fiber.Ctx, targetID uint) bool {
 const msgSuperHolderProtected = "无权修改超级管理员"
 
 func failUserMutation(c *fiber.Ctx, err error, fallback string) error {
+	var policyErr *adminsvc.PasswordPolicyError
 	switch {
+	case errors.As(err, &policyErr):
+		return dto.Fail(c, fiber.StatusBadRequest, policyErr.Error())
 	case errors.Is(err, adminsvc.ErrSuperAdminProtected):
 		return dto.Fail(c, fiber.StatusForbidden, err.Error())
 	case errors.Is(err, gorm.ErrRecordNotFound):

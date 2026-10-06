@@ -71,6 +71,9 @@ func UserHasSuperRole(id uint) bool {
 }
 
 func CreateUser(user *adminmodel.User, roleIDs []uint) error {
+	if err := CheckPasswordStrength(user.Password, user.Username); err != nil {
+		return err
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
@@ -98,6 +101,9 @@ func UpdateUser(id uint, updates map[string]any, roleIDs []uint) error {
 	}
 
 	if pwd, ok := updates["password"].(string); ok && pwd != "" {
+		if err := CheckPasswordStrength(pwd, user.Username); err != nil {
+			return err
+		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
 		if err != nil {
 			return err

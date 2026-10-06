@@ -41,28 +41,34 @@ func newLoginLimiter(now func() time.Time) *loginLimiter {
 	return &loginLimiter{entries: map[string]*loginFailEntry{}, now: now}
 }
 
-func loginLimitKeys(username, ip string) []struct {
+type loginLimitKey struct {
 	key string
 	max int
-} {
+}
+
+func loginLimitKeys(username, ip string) []loginLimitKey {
 	u := strings.ToLower(strings.TrimSpace(username))
-	return []struct {
-		key string
-		max int
-	}{
+	return []loginLimitKey{
 		{"ui:" + u + "|" + ip, maxFailsUserIP},
-		{"ip:" + ip, maxFailsIP},
+		ipLimitKey(ip),
 		{"u:" + u, maxFailsUsername},
 	}
 }
 
+// ipLimitKey 只按来源计数，拼图验证码校验失败也记在这里（那时还不知道用户名）。
+func ipLimitKey(ip string) loginLimitKey { return loginLimitKey{"ip:" + ip, maxFailsIP} }
+
 // locked 返回仍需等待的时长；0 表示放行。
 func (l *loginLimiter) locked(username, ip string) time.Duration {
+	return l.lockedKeys(loginLimitKeys(username, ip))
+}
+
+func (l *loginLimiter) lockedKeys(keys []loginLimitKey) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
 	var wait time.Duration
-	for _, k := range loginLimitKeys(username, ip) {
+	for _, k := range keys {
 		if e := l.entries[k.key]; e != nil && now.Before(e.lockedUntil) {
 			if d := e.lockedUntil.Sub(now); d > wait {
 				wait = d
@@ -73,13 +79,17 @@ func (l *loginLimiter) locked(username, ip string) time.Duration {
 }
 
 func (l *loginLimiter) fail(username, ip string) {
+	l.failKeys(loginLimitKeys(username, ip))
+}
+
+func (l *loginLimiter) failKeys(keys []loginLimitKey) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
 	if len(l.entries) >= loginLimitMaxKey {
 		l.sweepLocked(now)
 	}
-	for _, k := range loginLimitKeys(username, ip) {
+	for _, k := range keys {
 		e := l.entries[k.key]
 		if e == nil || now.Sub(e.windowStart) > loginFailWindow {
 			e = &loginFailEntry{windowStart: now, lockedUntil: e.lockedUntilOrZero()}
@@ -126,3 +136,12 @@ func RecordLoginFailure(username, ip string) { adminLoginLimiter.fail(username, 
 
 // RecordLoginSuccess 登录成功后调用。
 func RecordLoginSuccess(username, ip string) { adminLoginLimiter.succeed(username, ip) }
+
+// CaptchaLockedFor 拼图验证前调用：只看来源 IP 维度（登录失败与拼图失败共用这个计数）。
+func CaptchaLockedFor(ip string) time.Duration {
+	return adminLoginLimiter.lockedKeys([]loginLimitKey{ipLimitKey(ip)})
+}
+
+// RecordCaptchaFailure 拼图拖错后调用：计入来源 IP 的失败次数。拼图随机猜中率约 4%，
+// 不限次数的话脚本乱拖几十次就能拿到凭证。
+func RecordCaptchaFailure(ip string) { adminLoginLimiter.failKeys([]loginLimitKey{ipLimitKey(ip)}) }

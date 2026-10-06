@@ -188,3 +188,102 @@ func TestSeedUsersDoesNotReviveSoftDeletedAccount(t *testing.T) {
 		t.Fatalf("soft-deleted admin was revived by seeding (%d live rows)", alive)
 	}
 }
+
+// 生产库启动时删掉残留的演示账号（不论密码改没改）及其角色关联，其他账号和内置超管不动。
+func TestSeedUsersProductionPurgesDemoUsers(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(t.TempDir()+"/test.db"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	if err := db.AutoMigrate(&adminmodel.User{}, &adminmodel.Role{}); err != nil {
+		t.Fatalf("migrate test db: %v", err)
+	}
+	DB = db
+	prevMode := config.C.Server.Mode
+	t.Cleanup(func() { config.C.Server.Mode = prevMode })
+
+	for _, code := range []string{"super", "admin", "user"} {
+		DB.Create(&adminmodel.Role{Name: code, Code: code, Status: 1})
+	}
+	// 老库：曾以开发模式启动过，种下了 admin/jack
+	config.C.Server.Mode = "development"
+	seedUsers()
+	var adminUser adminmodel.User
+	DB.Where("username = ?", "admin").First(&adminUser)
+	strong, _ := bcrypt.GenerateFromPassword([]byte("Np7xQ2wLs9"), bcrypt.MinCost)
+	DB.Model(&adminUser).Update("password", string(strong)) // 改过密码的也要删
+	var userRole adminmodel.Role
+	DB.Where("code = ?", "user").First(&userRole)
+	alice := adminmodel.User{Username: "alice", Password: string(strong), Status: 1, Roles: []adminmodel.Role{userRole}}
+	DB.Create(&alice)
+
+	config.C.Server.Mode = "production"
+	seedUsers()
+
+	var names []string
+	DB.Model(&adminmodel.User{}).Unscoped().Order("username").Pluck("username", &names)
+	if !reflect.DeepEqual(names, []string{"alice", "super"}) {
+		t.Fatalf("生产库应只剩 super 和自建账号，得到 %v", names)
+	}
+	var orphan int64
+	DB.Model(&adminmodel.UserRole{}).Where("user_id NOT IN (?)", DB.Model(&adminmodel.User{}).Select("id")).Count(&orphan)
+	if orphan != 0 {
+		t.Fatalf("删除演示账号后残留 %d 条 user_roles", orphan)
+	}
+}
+
+func TestSeedConfigsLoginCaptchaDefaultByMode(t *testing.T) {
+	prevMode := config.C.Server.Mode
+	t.Cleanup(func() { config.C.Server.Mode = prevMode })
+	for mode, want := range map[string]string{"production": "true", "development": "false"} {
+		db, err := gorm.Open(sqlite.Open(t.TempDir()+"/test.db"), &gorm.Config{})
+		if err != nil {
+			t.Fatalf("open sqlite db: %v", err)
+		}
+		if err := db.AutoMigrate(&adminmodel.Config{}); err != nil {
+			t.Fatalf("migrate test db: %v", err)
+		}
+		DB = db
+		config.C.Server.Mode = mode
+		seedConfigs()
+		var cfg adminmodel.Config
+		DB.Where("config_key = ?", "login_captcha").First(&cfg)
+		if cfg.ConfigValue != want {
+			t.Errorf("%s 模式新库 login_captcha = %q，期望 %q", mode, cfg.ConfigValue, want)
+		}
+	}
+}
+
+// 早期种子的配置项没有名称，后台编辑配置时名称必填：启动时回填，已有名称不覆盖。
+func TestSeedConfigsBackfillsEmptyConfigName(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(t.TempDir()+"/test.db"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	if err := db.AutoMigrate(&adminmodel.Config{}); err != nil {
+		t.Fatalf("migrate test db: %v", err)
+	}
+	DB = db
+	DB.Create(&adminmodel.Config{ConfigKey: "login_captcha", ConfigValue: "false", Status: 1})
+	DB.Create(&adminmodel.Config{ConfigName: "自定义名称", ConfigKey: "site_name", ConfigValue: "X", Status: 1})
+
+	seedConfigs()
+
+	names := map[string]string{}
+	var cfgs []adminmodel.Config
+	DB.Find(&cfgs)
+	for _, c := range cfgs {
+		names[c.ConfigKey] = c.ConfigName
+	}
+	if names["login_captcha"] != "登录验证码" {
+		t.Errorf("空名称应回填，得到 %q", names["login_captcha"])
+	}
+	if names["site_name"] != "自定义名称" {
+		t.Errorf("已有名称不应被覆盖，得到 %q", names["site_name"])
+	}
+	for key, name := range names {
+		if name == "" {
+			t.Errorf("种子配置 %s 没有名称", key)
+		}
+	}
+}

@@ -57,7 +57,7 @@ func TestCreateUserRejectsSuperRoleAssignmentByNonSuper(t *testing.T) {
 	})
 
 	body, _ := json.Marshal(fiber.Map{
-		"username": "eve", "password": "123456", "realName": "Eve",
+		"username": "eve", "password": "Np7xQ2wLs9", "realName": "Eve",
 		"status": 1, "roleIds": []uint{superRole.ID},
 	})
 	req, _ := http.NewRequest(http.MethodPost, "/user", bytes.NewReader(body))
@@ -95,7 +95,7 @@ func TestCreateUserAllowsSuperRoleAssignmentBySuper(t *testing.T) {
 	})
 
 	body, _ := json.Marshal(fiber.Map{
-		"username": "trusted", "password": "123456", "realName": "Trusted",
+		"username": "trusted", "password": "Np7xQ2wLs9", "realName": "Trusted",
 		"status": 1, "roleIds": []uint{superRole.ID},
 	})
 	req, _ := http.NewRequest(http.MethodPost, "/user", bytes.NewReader(body))

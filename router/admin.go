@@ -21,6 +21,8 @@ func SetupAdmin(app *fiber.App) {
 
 	// Public auth routes
 	auth := g.Group("/auth")
+	auth.Get("/captcha", admin.GetCaptcha)
+	auth.Post("/captcha/verify", admin.VerifyCaptcha)
 	auth.Post("/login", admin.Login)
 	auth.Post("/logout", admin.Logout)
 	auth.Post("/refresh", admin.RefreshToken)

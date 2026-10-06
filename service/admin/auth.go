@@ -20,16 +20,26 @@ func Authenticate(username, password string) (*adminmodel.User, error) {
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
 		return nil, err
 	}
-	// 生产环境不认默认种子密码：哪怕库里的哈希对得上，也当作登录失败，逼运维先改密码
-	if config.IsProduction() && password == store.DefaultSeedPassword {
-		log.Printf("[auth] WARN: login rejected for %q: account still uses the default seed password", username)
-		return nil, ErrDefaultPassword
+	// 生产环境不认默认种子密码和弱口令：哪怕库里的哈希对得上，也当作登录失败，
+	// 逼运维先把口令改合格（超管被拦时用 `<server> reset-password super` 重置）
+	if config.IsProduction() {
+		if password == store.DefaultSeedPassword {
+			log.Printf("[auth] WARN: login rejected for %q: account still uses the default seed password", username)
+			return nil, ErrDefaultPassword
+		}
+		if !passwordMeetsBaseline(password, user.Username) {
+			log.Printf("[auth] WARN: login rejected for %q: password does not meet the strength policy; reset it in the admin UI (or `<server> reset-password %s`)", username, user.Username)
+			return nil, ErrWeakPassword
+		}
 	}
 	return &user, nil
 }
 
 // ErrDefaultPassword 生产环境用默认种子密码登录（对外与密码错误同一提示）。
 var ErrDefaultPassword = errors.New("default seed password is not allowed in production")
+
+// ErrWeakPassword 生产环境用不达标的弱口令登录（对外与密码错误同一提示，不泄露"密码其实是对的"）。
+var ErrWeakPassword = errors.New("weak password is not allowed in production")
 
 func GetUserByID(id uint) (*adminmodel.User, error) {
 	var user adminmodel.User

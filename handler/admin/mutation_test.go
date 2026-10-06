@@ -232,7 +232,7 @@ func TestDeleteUserHardDeletesAndAllowsSameUsernameAgain(t *testing.T) {
 	}
 
 	resp := jsonRequest(t, app, http.MethodPost, "/user", fiber.Map{
-		"username": "temp", "password": "123456", "realName": "Temp", "status": 1,
+		"username": "temp", "password": "Np7xQ2wLs9", "realName": "Temp", "status": 1,
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("recreate user with same username: expected 200, got %d", resp.StatusCode)
