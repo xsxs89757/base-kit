@@ -5,6 +5,7 @@ import (
 
 	"github.com/xsxs89757/base-kit/dto"
 	admindto "github.com/xsxs89757/base-kit/dto/admin"
+	"github.com/xsxs89757/base-kit/middleware"
 	adminmodel "github.com/xsxs89757/base-kit/model/admin"
 	"github.com/xsxs89757/base-kit/store"
 
@@ -79,11 +80,18 @@ func GetOperationLogList(c *fiber.Ctx) error {
 // @Tags 系统管理 - 操作日志
 // @Produce json
 // @Security BearerAuth
+// @Description 仅超级管理员可删除（审计记录不应由被审计的人抹掉）
 // @Param id path int true "日志ID"
 // @Success 200 {object} dto.Response
+// @Failure 403 {object} dto.Response
 // @Failure 404 {object} dto.Response
 // @Router /admin/system/operation-log/{id} [delete]
 func DeleteOperationLog(c *fiber.Ctx) error {
+	// 审计记录只有超管能删：持有删除权限码的普通管理员也不行，否则可以先操作、再抹掉痕迹。
+	// 日常清理交给 server.op_log_retention_days 按保留期自动删
+	if !middleware.OperatorIsSuper(c) {
+		return dto.Fail(c, fiber.StatusForbidden, msgOperationLogSuperOnly)
+	}
 	id, _ := strconv.ParseUint(c.Params("id"), 10, 64)
 	res := store.DB.Delete(&adminmodel.OperationLog{}, id)
 	if res.Error != nil {
@@ -100,11 +108,20 @@ func DeleteOperationLog(c *fiber.Ctx) error {
 // @Tags 系统管理 - 操作日志
 // @Produce json
 // @Security BearerAuth
+// @Description 仅超级管理员可清空；日常清理请用配置 server.op_log_retention_days 按保留期自动删除
 // @Success 200 {object} dto.Response
+// @Failure 403 {object} dto.Response
 // @Router /admin/system/operation-log/clear [delete]
 func ClearOperationLog(c *fiber.Ctx) error {
+	// 审计记录只有超管能删：持有删除权限码的普通管理员也不行，否则可以先操作、再抹掉痕迹。
+	// 日常清理交给 server.op_log_retention_days 按保留期自动删
+	if !middleware.OperatorIsSuper(c) {
+		return dto.Fail(c, fiber.StatusForbidden, msgOperationLogSuperOnly)
+	}
 	if err := store.DB.Where("1 = 1").Delete(&adminmodel.OperationLog{}).Error; err != nil {
 		return dto.Fail(c, fiber.StatusInternalServerError, "Failed to clear operation logs")
 	}
 	return dto.Success(c, nil)
 }
+
+const msgOperationLogSuperOnly = "只有超级管理员可以删除操作日志"

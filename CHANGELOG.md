@@ -7,6 +7,21 @@ base-kit 的版本记录。格式参考 Keep a Changelog，版本号遵循语义
 
 ## [Unreleased]
 
+### 安全
+
+- 菜单的外链（`link`）与内嵌页（`iframeSrc`）地址只允许 `http(s)://` 链接或以 `/` 开头的站内路径，新增、
+  修改时校验（400），并去掉首尾空白。此前任意值都能存：有菜单编辑权限的人填 `javascript:` 地址，超管点开
+  菜单时脚本在后台域名下执行，能读走 localStorage 里的 token，等于借菜单提权到超管。库里已有的危险地址不再
+  通过 `/admin/menu/all` 下发给前端（日志打 WARN），菜单管理列表仍原样展示，方便改掉。
+- 删除、清空操作日志只允许超级管理员（内置超管或持 super 角色），持 `System:OperationLog:Delete` 的普通管理员
+  返回 403：审计记录不应由被审计的人抹掉。日常清理用配置 `server.op_log_retention_days` 按保留期自动删除。
+
+#### 升级步骤
+
+1. 启动后看日志有没有 `has an unsafe link` / `has an unsafe iframeSrc` 的 WARN，有就到「菜单管理」把对应菜单的
+   地址改成 `https://` 链接或站内路径（这些菜单的外链在改好前点不开）。
+2. 原来靠普通管理员清理操作日志的，改为配置 `server.op_log_retention_days`（生产建议 90），或交给超管操作。
+
 ## [1.3.0] - 2026-10-06
 
 ### 安全

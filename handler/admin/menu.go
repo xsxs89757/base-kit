@@ -3,6 +3,7 @@ package admin
 import (
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/xsxs89757/base-kit/dto"
 	admindto "github.com/xsxs89757/base-kit/dto/admin"
@@ -92,6 +93,10 @@ func CreateMenu(c *fiber.Ctx) error {
 	if err := validator.BindAndValidate(c, &req); err != nil {
 		return err
 	}
+	if !safeMenuURL(req.Link) || !safeMenuURL(req.IframeSrc) {
+		return dto.Fail(c, fiber.StatusBadRequest, msgUnsafeMenuURL)
+	}
+	req.Link, req.IframeSrc = strings.TrimSpace(req.Link), strings.TrimSpace(req.IframeSrc)
 
 	if ok, err := parentExists(store.DB, &adminmodel.Menu{}, req.ParentID); err != nil {
 		return dto.Fail(c, fiber.StatusInternalServerError, "Failed to create menu")
@@ -126,6 +131,10 @@ func UpdateMenu(c *fiber.Ctx) error {
 	if err := validator.BindAndValidate(c, &req); err != nil {
 		return err
 	}
+	if !safeMenuURL(req.Link) || !safeMenuURL(req.IframeSrc) {
+		return dto.Fail(c, fiber.StatusBadRequest, msgUnsafeMenuURL)
+	}
+	req.Link, req.IframeSrc = strings.TrimSpace(req.Link), strings.TrimSpace(req.IframeSrc)
 
 	var existing adminmodel.Menu
 	if err := store.DB.First(&existing, id).Error; err != nil {
@@ -349,7 +358,7 @@ func buildMenuTree(menus []adminmodel.Menu, parentID uint) []fiber.Map {
 			node := fiber.Map{
 				"name": m.Name,
 				"path": m.Path,
-				"meta": menuMeta(m),
+				"meta": runtimeMenuMeta(m),
 			}
 			if m.Component != "" {
 				node["component"] = m.Component
