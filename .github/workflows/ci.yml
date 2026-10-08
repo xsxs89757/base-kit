@@ -51,4 +51,6 @@ jobs:
       - name: AutoMigrate + 种子数据 + 操作日志写入
         env:
           BASEKIT_TEST_MYSQL_DSN: root:root@tcp(127.0.0.1:3306)/basekit_test?charset=utf8mb4&parseTime=True&loc=Local
-        run: go test ./store/ ./middleware/ -run TestMySQL -v
+        # -p 1：两个包的测试连的是同一个库，并行跑时会同时 AutoMigrate sys_operation_logs，
+        # 偶发 "Error 1050 Table already exists"
+        run: go test -p 1 ./store/ ./middleware/ -run TestMySQL -v
