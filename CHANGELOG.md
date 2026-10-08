@@ -7,6 +7,8 @@ base-kit 的版本记录。格式参考 Keep a Changelog，版本号遵循语义
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-08
+
 ### 安全
 
 - 菜单的外链（`link`）与内嵌页（`iframeSrc`）地址只允许 `http(s)://` 链接或以 `/` 开头的站内路径，新增、
